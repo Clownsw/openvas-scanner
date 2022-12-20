@@ -1,5 +1,5 @@
 [package]
-name = "nvtcache"
+name = "redis-sink"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 redis = "0.22.1"
 chrono = "0.4.23"
+sink = { path = "../sink" }
+
 
 [features]
 # uses a redis instance when enabled 

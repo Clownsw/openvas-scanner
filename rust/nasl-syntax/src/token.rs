@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use crate::ACT;
+
 ///! This module defines the TokenTypes as well as Token and extends Cursor with advance_token
 use crate::cursor::Cursor;
 
@@ -74,32 +76,6 @@ pub enum UnclosedCategory {
     String(StringCategory),
 }
 
-/// Attack Category either set by script_category or on a scan to reflect the state the scan is in
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ACT {
-    /// Defines a initializer
-    Init = 0,
-    /// Defines a port scanner
-    Scanner,
-    /// Defines a settings configurator
-    Settings,
-    /// Gathers information about the environment the scan runs in
-    GatherInfo,
-    /// Executes actual attacks
-    Attack,
-    /// Same as attack left for downwards Compatibility
-    MixedAttack,
-    /// Exhausting attack should not be considered safe to execute
-    DestructiveAttack,
-    /// Exhausting attack should not be considered safe to execute
-    Denial,
-    /// Exhausting attack should not be considered safe to execute
-    KillHost,
-    /// Exhausting attack should not be considered safe to execute
-    Flood,
-    /// Should be executed at the end
-    End,
-}
 
 macro_rules! make_keyword_matcher {
     ($($matcher:ident : $define:expr),+) => {
@@ -311,7 +287,7 @@ pub enum Category {
     GreaterGreaterGreaterEqual,
     /// `x` is a special functionality to redo a function call n times.E.g. `send_packet( udp, pcap_active:FALSE ) x 200;`
     X,
-    /// A String can be either Quoteable (') or Unquoteable (") both can be multiline
+    /// A String can be either Quotable (') or Unquotable (") both can be multiline
     String(StringCategory),
     /// A Number can be either binary (0b), octal (0), base10 (1-9) or hex (0x)
     Number(Base),

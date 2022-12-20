@@ -546,6 +546,7 @@ name = "nasl-interpreter"
 version = "0.1.0"
 dependencies = [
  "nasl-syntax",
+ "sink",
 ]
 
 [[package]]
@@ -553,6 +554,7 @@ name = "nasl-syntax"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "sink",
 ]
 
 [[package]]
@@ -582,14 +584,6 @@ checksum = "f6058e64324c71e02bc2b150e4f3bc8286db6c83092132ffa3f6b1eab0f9def5"
 dependencies = [
  "hermit-abi 0.1.19",
  "libc",
-]
-
-[[package]]
-name = "nvtcache"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "redis",
 ]
 
 [[package]]
@@ -724,6 +718,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis-sink"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "redis",
+ "sink",
+]
+
+[[package]]
 name = "regex"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -815,6 +818,10 @@ name = "sha1_smol"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae1a47186c03a32177042e55dbc5fd5aee900b8e0069a8d70fba96a9375cd012"
+
+[[package]]
+name = "sink"
+version = "0.1.0"
 
 [[package]]
 name = "strsim"

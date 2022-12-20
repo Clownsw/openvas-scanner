@@ -1,6 +1,6 @@
-use crate::dberror::Result;
+use crate::dberror::RedisSinkResult;
 use chrono::prelude::*;
-use std::fmt;
+use sink::nvt::{NvtRef, NvtPreference, ACT};
 
 ///Alias for time stamps
 type TimeT = i64;
@@ -35,55 +35,11 @@ pub fn parse_nvt_timestamp(str_time: &str) -> TimeT {
     ret
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd)]
-pub enum Category {
-    ActInit = 0,
-    ActScanner,
-    ActSettings,
-    ActGatherInfo,
-    ActAttack,
-    ActMixedAttack,
-    ActDestructiveAttack,
-    ActDenial,
-    ActKillHost,
-    ActFlood,
-    ActEnd,
-}
-
-impl fmt::Display for Category {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", (*self as i32))
-    }
-}
-
-/// Structure to store NVT preferences
-#[derive(Debug)]
-pub struct NvtPref {
-    /// Preference ID
-    pref_id: i32,
-    /// Preference type
-    pref_type: String,
-    /// Name of the preference
-    name: String,
-    /// Default value of the preference
-    default: String,
-}
-
-/// Structure to store NVT References
-#[derive(Debug)]
-pub struct NvtRef {
-    /// Reference type ("cve", "bid", ...)
-    ref_type: String,
-    /// Actual reference ID ("CVE-2018-1234", etc)
-    ref_id: String,
-    /// Optional additional text
-    ref_text: String,
-}
 
 /// Structure to store NVT Severities
 // Severities are stored in redis under the Tag item
 // Currently not used
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct NvtSeverity {
     /// Severity type ("cvss_base_v2", ...)
@@ -99,81 +55,16 @@ pub struct NvtSeverity {
     value: String,
 }
 
-impl NvtPref {
-    pub fn new(pref_id: i32, pref_type: String, name: String, default: String) -> Result<NvtPref> {
-        Ok(NvtPref {
-            pref_id,
-            pref_type,
-            name,
-            default,
-        })
-    }
 
-    /// Return the id of the NvtPref
-    pub fn get_id(&self) -> i32 {
-        self.pref_id
-    }
-    /// Return the type of the NvtPref
-    pub fn get_type(&self) -> &str {
-        &self.pref_type
-    }
-    /// Return the name of the NvtPref
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-    /// Return the default value of the NvtPref
-    pub fn get_default(&self) -> &str {
-        &self.default
-    }
-}
 
-impl NvtRef {
-    /// Return a new NvtRef object with the passed values
-    pub fn new(ref_type: String, ref_id: String, ref_text: String) -> Result<NvtRef> {
-        Ok(NvtRef {
-            ref_type,
-            ref_id,
-            ref_text,
-        })
-    }
-    /// Return the type of the NvtRef
-    pub fn get_type(&self) -> &str {
-        &self.ref_type
-    }
-    /// Return the id of the NvtRef
-    pub fn get_id(&self) -> &str {
-        &self.ref_id
-    }
-    /// Return the text of the NvtRef
-    pub fn get_text(&self) -> &str {
-        &self.ref_text
-    }
-}
-
-// Currently not used
-impl NvtSeverity {
-    pub fn new(
-        severity_type: String,
-        origin: String,
-        date: i32,
-        score: f32,
-        value: String,
-    ) -> Result<NvtSeverity> {
-        Ok(NvtSeverity {
-            severity_type,
-            origin,
-            date,
-            score,
-            value,
-        })
-    }
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 /// Structure to hold a NVT
 pub struct Nvt {
     oid: String,
     name: String,
+    filename: String,
+    tag: Vec<(String, String)>,
+    cvss_base: String, //Stored in redis under Tag item. Not in use.
     summary: String,          //Stored in redis under Tag item. Not in use.
     insight: String,          //Stored in redis under Tag item. Not in use.
     affected: String,         //Stored in redis under Tag item. Not in use.
@@ -183,21 +74,19 @@ pub struct Nvt {
     solution: String,         //Stored in redis under Tag item. Not in use.
     solution_type: String,    //Stored in redis under Tag item. Not in use.
     solution_method: String,  //Stored in redis under Tag item. Not in use.
-    tag: Vec<(String, String)>,
-    cvss_base: String, //Stored in redis under Tag item. Not in use.
+    detection: String, //Stored in redis under Tag item. Not in use.
+    qod_type: String,  //Stored in redis under Tag item. Not in use.
+    qod: String,       //Stored in redis under Tag item. Not in use.
+    severities: Vec<NvtSeverity>, //Stored in redis under Tag item. Not in use.
     dependencies: Vec<String>,
     required_keys: Vec<String>,
     mandatory_keys: Vec<String>,
     excluded_keys: Vec<String>,
     required_ports: Vec<String>,
     required_udp_ports: Vec<String>,
-    detection: String, //Stored in redis under Tag item. Not in use.
-    qod_type: String,  //Stored in redis under Tag item. Not in use.
-    qod: String,       //Stored in redis under Tag item. Not in use.
     refs: Vec<NvtRef>,
-    severities: Vec<NvtSeverity>, //Stored in redis under Tag item. Not in use.
-    prefs: Vec<NvtPref>,
-    category: Category,
+    prefs: Vec<NvtPreference>,
+    category: ACT,
     family: String,
 }
 
@@ -206,6 +95,7 @@ impl Default for Nvt {
         Nvt {
             oid: String::new(),
             name: String::new(),
+            filename: String::new(),
             summary: String::new(),
             insight: String::new(),
             affected: String::new(),
@@ -229,7 +119,7 @@ impl Default for Nvt {
             refs: vec![],
             severities: vec![],
             prefs: vec![],
-            category: Category::ActEnd,
+            category: ACT::End,
             family: String::new(),
         }
     }
@@ -237,8 +127,8 @@ impl Default for Nvt {
 
 impl Nvt {
     /// Nvt constructor
-    pub fn new() -> Result<Nvt> {
-        return Ok(Nvt::default());
+    pub fn new() -> RedisSinkResult<Nvt> {
+        Ok(Nvt::default())
     }
 
     /// Set the NVT OID
@@ -315,40 +205,34 @@ impl Nvt {
         self.cvss_base = cvss_base;
     }
 
-    fn vec_of_str(&self, deps: &String) -> Vec<String> {
-        let list: Vec<&str> = deps.split(",").collect();
-        let deps = list.iter().map(|&d| d.to_string()).collect();
-        deps
-    }
-
     /// Set the NVT dependencies
-    pub fn set_dependencies(&mut self, dependencies: String) {
-        self.dependencies = self.vec_of_str(&dependencies);
+    pub fn set_dependencies(&mut self, dependencies: Vec<String>) {
+        self.dependencies = dependencies;
     }
 
     /// Set the NVT required keys
-    pub fn set_required_keys(&mut self, required_keys: String) {
-        self.required_keys = self.vec_of_str(&required_keys);
+    pub fn set_required_keys(&mut self, required_keys: Vec<String>) {
+        self.required_keys = required_keys;
     }
 
     /// Set the NVT mandatory keys
-    pub fn set_mandatory_keys(&mut self, mandatory_keys: String) {
-        self.mandatory_keys = self.vec_of_str(&mandatory_keys);
+    pub fn set_mandatory_keys(&mut self, mandatory_keys: Vec<String>) {
+        self.mandatory_keys = mandatory_keys;
     }
 
     /// Set the NVT excluded keys
-    pub fn set_excluded_keys(&mut self, excluded_keys: String) {
-        self.excluded_keys = self.vec_of_str(&excluded_keys);
+    pub fn set_excluded_keys(&mut self, excluded_keys: Vec<String>) {
+        self.excluded_keys = excluded_keys;
     }
 
     /// Set the NVT required ports
-    pub fn set_required_ports(&mut self, required_ports: String) {
-        self.required_ports = self.vec_of_str(&required_ports);
+    pub fn set_required_ports(&mut self, required_ports: Vec<String>) {
+        self.required_ports = required_ports;
     }
 
     /// Set the NVT required udp ports
-    pub fn set_required_udp_ports(&mut self, required_udp_ports: String) {
-        self.required_udp_ports = self.vec_of_str(&required_udp_ports);
+    pub fn set_required_udp_ports(&mut self, required_udp_ports: Vec<String>) {
+        self.required_udp_ports = required_udp_ports;
     }
 
     /// Set the NVT detection
@@ -370,7 +254,7 @@ impl Nvt {
     }
 
     /// Set the NVT category. Check that category is a valid Category
-    pub fn set_category(&mut self, category: Category) {
+    pub fn set_category(&mut self, category: ACT) {
         self.category = category;
     }
 
@@ -408,7 +292,7 @@ impl Nvt {
     }
 
     /// Function to add a new preference to the Nvt
-    pub fn add_pref(&mut self, pref: NvtPref) {
+    pub fn add_pref(&mut self, pref: NvtPreference) {
         self.prefs.push(pref);
     }
 
@@ -426,133 +310,133 @@ impl Nvt {
     //   GET FUNCTIONS
 
     /// Get the NVT OID
-    pub fn get_oid(&self) -> &str {
+    pub fn oid(&self) -> &str {
         &self.oid
     }
 
     /// Get the NVT name
-    pub fn get_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
     }
 
     /// Get the NVT summary
     // Not used during plugin upload.
-    pub fn get_summary(&self) -> &str {
+    pub fn summary(&self) -> &str {
         &self.summary
     }
 
     /// Get the NVT insight
     // Not used during plugin upload.
-    pub fn get_insight(&self) -> &str {
+    pub fn insight(&self) -> &str {
         &self.insight
     }
 
     /// Get the NVT affected
     // Not used during plugin upload.
-    pub fn get_affected(&self) -> &str {
+    pub fn affected(&self) -> &str {
         &self.affected
     }
 
     /// Get the NVT impact
     // Not used during plugin upload.
-    pub fn get_impact(&self) -> &str {
+    pub fn impact(&self) -> &str {
         &self.impact
     }
 
     /// Get the NVT creation_time
     // Not used during plugin upload.
-    pub fn get_creation_time(&mut self) -> Result<TimeT> {
-        Ok(self.creation_time.clone())
+    pub fn creation_time(&mut self) -> RedisSinkResult<TimeT> {
+        Ok(self.creation_time)
     }
 
     /// Get the NVT modification_time
     // Not used during plugin upload.
-    pub fn get_modification_time(&mut self) -> Result<TimeT> {
-        Ok(self.modification_time.clone())
+    pub fn modification_time(&mut self) -> RedisSinkResult<TimeT> {
+        Ok(self.modification_time)
     }
     /// Get the NVT solution
     // Not used during plugin upload.
-    pub fn get_solution(&self) -> &str {
+    pub fn solution(&self) -> &str {
         &self.solution
     }
 
     /// Get the NVT solution_type
     // Not used during plugin upload.
-    pub fn get_solution_type(&self) -> &str {
+    pub fn solution_type(&self) -> &str {
         &self.solution_type
     }
 
     /// Get the NVT solution method
     // Not used during plugin upload.
-    pub fn get_solution_method(&self) -> &str {
+    pub fn solution_method(&self) -> &str {
         &self.solution_method
     }
 
     /// Get the NVT tag
-    pub fn get_tag(&self) -> &Vec<(String, String)> {
+    pub fn tag(&self) -> &Vec<(String, String)> {
         &self.tag
     }
 
     /// Get the NVT CVSS base
     // Not used during plugin upload.
-    pub fn get_cvss_base(&self) -> &str {
+    pub fn cvss_base(&self) -> &str {
         &self.cvss_base
     }
     /// Get the NVT dependencies
-    pub fn get_dependencies(&self) -> &Vec<String> {
+    pub fn dependencies(&self) -> &Vec<String> {
         &self.dependencies
     }
 
     /// Get the NVT required keys
-    pub fn get_required_keys(&self) -> &Vec<String> {
+    pub fn required_keys(&self) -> &Vec<String> {
         &self.required_keys
     }
 
     /// Get the NVT mandatory keys
-    pub fn get_mandatory_keys(&self) -> &Vec<String> {
+    pub fn mandatory_keys(&self) -> &Vec<String> {
         &self.mandatory_keys
     }
 
     /// Get the NVT excluded keys
-    pub fn get_excluded_keys(&self) -> &Vec<String> {
+    pub fn excluded_keys(&self) -> &Vec<String> {
         &self.excluded_keys
     }
 
     /// Get the NVT required ports
-    pub fn get_required_ports(&self) -> &Vec<String> {
+    pub fn required_ports(&self) -> &Vec<String> {
         &self.required_ports
     }
 
     /// Get the NVT required udp ports
-    pub fn get_required_udp_ports(&self) -> &Vec<String> {
+    pub fn required_udp_ports(&self) -> &Vec<String> {
         &self.required_udp_ports
     }
 
     /// Get the NVT detection
     // Not used during plugin upload.
-    pub fn get_detection(&self) -> &str {
+    pub fn detection(&self) -> &str {
         &self.detection
     }
 
     /// Get the NVT QoD Type
     // Not used during plugin upload.
-    pub fn get_qod_type(&self) -> &str {
+    pub fn qod_type(&self) -> &str {
         &self.qod_type
     }
 
     /// Get the NVT QoD (Quality of Detection)
     // Not used during plugin upload.
-    pub fn get_qod(&self) -> &str {
+    pub fn qod(&self) -> &str {
         &self.qod
     }
 
     /// Get the NVT category.
-    pub fn get_category(&self) -> i32 {
+    pub fn category(&self) -> i32 {
         self.category as i32
     }
 
     /// Get the NVT family
-    pub fn get_family(&self) -> &str {
+    pub fn family(&self) -> &str {
         &self.family
     }
 
@@ -564,25 +448,25 @@ impl Nvt {
     /// cve and bid strings are CSC strings containing only
     /// "id, id, ...", while other custom types includes the type
     /// and the string is in the format "type:id, type:id, ..."
-    pub fn get_refs(&self) -> (String, String, String) {
+    pub fn refs(&self) -> (String, String, String) {
         let (bids, cves, xrefs): (Vec<String>, Vec<String>, Vec<String>) =
             self.refs
                 .iter()
                 .fold((vec![], vec![], vec![]), |(bids, cves, xrefs), b| {
-                    match b.get_type() {
+                    match b.class() {
                         "bid" => {
                             let mut new_bids = bids;
-                            new_bids.push(b.get_id().to_string());
+                            new_bids.push(b.id().to_string());
                             (new_bids, cves, xrefs)
                         }
                         "cve" => {
                             let mut new_cves = cves;
-                            new_cves.push(b.get_id().to_string());
+                            new_cves.push(b.id().to_string());
                             (bids, new_cves, xrefs)
                         }
                         _ => {
                             let mut new_xref: Vec<String> = xrefs;
-                            new_xref.push(format!("{}:{}", b.get_type(), b.get_id()));
+                            new_xref.push(format!("{}:{}", b.class(), b.id()));
                             (bids, cves, new_xref)
                         }
                     }
@@ -598,19 +482,27 @@ impl Nvt {
         );
     }
 
-    /// Transforms prefs to string representatiosn {id}:{name}:{id}:{default} so that it can be stored into redis
-    pub fn get_prefs(&self) -> Vec<String> {
+    /// Transforms prefs to string representation {id}:{name}:{id}:{default} so that it can be stored into redis
+    pub fn prefs(&self) -> Vec<String> {
         self.prefs
             .iter()
             .map(|pref| {
                 format!(
                     "{}:{}:{}:{}",
-                    pref.get_id(),
-                    pref.get_name(),
-                    pref.get_type(),
-                    pref.get_default()
+                    pref.id().unwrap_or_default(),
+                    pref.name(),
+                    pref.class().as_ref(),
+                    pref.default()
                 )
             })
             .collect()
+    }
+
+    pub fn set_filename(&mut self, filename: String) {
+        self.filename = filename;
+    }
+
+    pub fn filename(&self) -> &str {
+        self.filename.as_ref()
     }
 }

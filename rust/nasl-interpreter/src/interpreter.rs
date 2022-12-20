@@ -3,21 +3,13 @@ use std::ops::Range;
 use nasl_syntax::{
     NumberBase, Statement, Statement::*, StringCategory, Token, TokenCategory, ACT, Keyword,
 };
+use sink::Sink;
 
 use crate::{
     context::{ContextType, CtxType, Register},
     error::InterpretError,
     lookup,
 };
-
-// TODO Allow multiple value types
-/// Persistent storage, which is used to communicate between NASL Scripts
-pub trait Storage {
-    /// Put a value into the storage
-    fn write(&mut self, key: &str, value: &str);
-    /// Read a value from the storage
-    fn read(&self, key: &str) -> Option<&str>;
-}
 
 /// Represents a valid Value of NASL
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,9 +50,12 @@ impl ToString for NaslValue {
 
 /// Used to interpret a Statement
 pub struct Interpreter<'a> {
+    // TODO change to enum
+    oid: Option<&'a str>,
+    filename: Option<&'a str>,
     code: &'a str,
     registrat: Register,
-    storage: &'a mut dyn Storage,
+    storage: &'a dyn Sink,
 }
 
 trait PrimitiveResolver<T> {
@@ -132,17 +127,29 @@ impl TryFrom<(&str, Token)> for NaslValue {
 impl<'a> Interpreter<'a> {
     /// Creates a new Interpreter.
     pub fn new(
-        storage: &'a mut dyn Storage,
+        storage: &'a dyn Sink,
         initial: Vec<(String, ContextType)>,
+        oid: Option<&'a str>,
+        filename: Option<&'a str>,
         code: &'a str,
     ) -> Self {
         let mut registrat = Register::default();
         registrat.create_root(initial);
         Interpreter {
+            oid,
+            filename,
             code,
             registrat,
             storage,
         }
+    }
+
+    fn resolve_key(&self) -> &str {
+        if let Some(oid) = self.oid {
+            return oid;
+        }
+        self.filename.unwrap_or_default()
+        
     }
 
     /// Interprets a Statement
@@ -207,11 +214,12 @@ impl<'a> Interpreter<'a> {
                 // TODO change to use root context to lookup both
                 let result = match lookup(name) {
                     // Built-In Function
-                    Some(function) => match function(self.storage, &mut self.registrat) {
+                    Some(function) => match function(self.resolve_key(), self.storage, &self.registrat) {
                         Ok(value) => Ok(value),
-                        Err(_) => Err(InterpretError::new(format!(
-                            "unable to call function {}",
-                            name
+                        Err(x) => Err(InterpretError::new(format!(
+                            "unable to call function {}: {:?}",
+                            name,
+                            x
                         ))),
                     },
                     // Check for user defined function
@@ -252,63 +260,8 @@ impl<'a> Interpreter<'a> {
             AttackCategory(cat) => Ok(NaslValue::AttackCategory(cat)),
         }
     }
-}
 
-#[cfg(test)]
-mod test {
-    use std::collections::HashMap;
-
-    use nasl_syntax::{Statement, StringCategory, TokenCategory};
-
-    use crate::interpreter::NaslValue;
-
-    use super::{Interpreter, Storage};
-
-    struct MockStorage {
-        map: HashMap<String, String>,
-    }
-
-    impl MockStorage {
-        fn new() -> Self {
-            MockStorage {
-                map: HashMap::new(),
-            }
-        }
-    }
-
-    impl Storage for MockStorage {
-        fn write(&mut self, key: &str, value: &str) {
-            self.map.insert(key.to_string(), value.to_string());
-        }
-        fn read(&self, key: &str) -> Option<&str> {
-            if self.map.contains_key(key) {
-                return Some(self.map[key].as_str());
-            }
-            None
-        }
-    }
-
-    #[test]
-    fn built_in() {
-        let code = "script_name(\"test_script\");";
-        let statement = Statement::Call(
-            nasl_syntax::Token {
-                category: TokenCategory::Identifier(None),
-                position: (0, 11),
-            },
-            Box::new(Statement::Parameter(vec![Statement::Primitive(
-                nasl_syntax::Token {
-                    category: nasl_syntax::TokenCategory::String(StringCategory::Unquotable),
-                    position: (13, 24),
-                },
-            )])),
-        );
-        let mut storage = MockStorage::new();
-
-        let mut interpreter = Interpreter::new(&mut storage, vec![], code);
-
-        assert_eq!(interpreter.resolve(statement), Ok(NaslValue::Null));
-        assert!(storage.map.contains_key("name"));
-        assert_eq!(storage.map.get("name").unwrap().as_str(), "test_script");
+    pub fn registrat(&self) -> &Register {
+        &self.registrat
     }
 }
